@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -71,3 +72,24 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`AquaSave server running on ${PORT} 🚀`);
 });
+=======
+{
+  "name": "server",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+
+  "overrides": {
+    "minimatch": "^10.2.1",
+    "glob": "^10.6.0",
+    "rimraf": "^5.0.11"
+  },
+
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "node-fetch": "^3.3.2"
+  }
+}
+>>>>>>> bed8911c3ddddd3d9e94316b7edadc80bb34a676
