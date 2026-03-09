@@ -354,7 +354,10 @@ const response = await fetch("/api/gemini", {
     }
 
     if (!response.ok) {
-      const serverMsg = data?.error || data?.message || "API request failed";
+      const serverMsg =
+        data?.error ||
+        data?.message ||
+        `API request failed (${response.status})`;
       throw new Error(serverMsg);
     }
 
