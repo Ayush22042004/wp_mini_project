@@ -1,33 +1,62 @@
-<<<<<<< HEAD
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
+import path from "path";
+import { fileURLToPath } from "url";
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, "..");
+
+dotenv.config({ path: path.join(__dirname, ".env") });
 
 const app = express();
 
-/* ================= CORS ================= */
-app.use(cors({
-  origin: ["http://127.0.0.1:5500", "http://localhost:5500","https://aquasave1.vercel.app/"],
-methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type"]
-}));
+const allowedOrigins = new Set([
+  "https://aquasave1.vercel.app",
+]);
+
+function isAllowedLocalOrigin(origin) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+}
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Allow server-to-server requests and local file:// origin ("null") in development.
+      if (!origin || origin === "null" || isAllowedLocalOrigin(origin) || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error("Not allowed by CORS"));
+    },
+    methods: ["GET", "POST"],
+    allowedHeaders: ["Content-Type"],
+  })
+);
 
 app.use(express.json());
+app.use(express.static(projectRoot));
 
-/* ================= TEST ROUTE ================= */
 app.get("/", (req, res) => {
-  res.send("AquaSave server running 🚀");
+  res.sendFile(path.join(projectRoot, "index.html"));
 });
+
 app.get("/api/test", (req, res) => {
   res.json({ status: "server working" });
 });
 
-/* ================= GEMINI ROUTE ================= */
+app.get("/favicon.ico", (req, res) => {
+  res.status(204).end();
+});
+
 app.post("/api/gemini", async (req, res) => {
   try {
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(500).json({ error: "GEMINI_API_KEY is not set on server" });
+    }
+
     const { message } = req.body;
 
     if (!message) {
@@ -45,8 +74,8 @@ app.post("/api/gemini", async (req, res) => {
               parts: [
                 {
                   text: `You are AquaSave AI, a friendly expert on water conservation.
-The creators of this website are **Ayush Singh**, **Prathmesh Achare**, **Kunal Datkhile**, and **Alby John**.
-Do NOT introduce the creators unless the user specifically asks who created the website.
+The creators of this website are Ayush Singh, Prathmesh Achare, Kunal Datkhile, and Alby John.
+Do not introduce the creators unless the user specifically asks who created the website.
 
 User: ${message}`,
                 },
@@ -58,38 +87,24 @@ User: ${message}`,
     );
 
     const data = await response.json();
-    res.json(data);
 
+    if (!response.ok) {
+      console.error("Gemini API error:", data);
+      return res.status(response.status).json({
+        error: "Gemini API request failed",
+        details: data,
+      });
+    }
+
+    res.status(200).json(data);
   } catch (err) {
     console.error("Gemini proxy error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-/* ================= START SERVER ================= */
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`AquaSave server running on ${PORT} 🚀`);
+  console.log(`AquaSave server running on http://localhost:${PORT}`);
 });
-=======
-{
-  "name": "server",
-  "version": "1.0.0",
-  "type": "module",
-  "main": "server.js",
-
-  "overrides": {
-    "minimatch": "^10.2.1",
-    "glob": "^10.6.0",
-    "rimraf": "^5.0.11"
-  },
-
-  "dependencies": {
-    "cors": "^2.8.6",
-    "dotenv": "^17.3.1",
-    "express": "^5.2.1",
-    "node-fetch": "^3.3.2"
-  }
-}
->>>>>>> bed8911c3ddddd3d9e94316b7edadc80bb34a676

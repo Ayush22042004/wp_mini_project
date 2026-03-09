@@ -346,9 +346,17 @@ const response = await fetch("/api/gemini", {
 });
     clearTimeout(timeoutId);
 
-    if (!response.ok) throw new Error("API request failed");
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      // Non-JSON errors still get a generic message below.
+    }
 
-    const data = await response.json();
+    if (!response.ok) {
+      const serverMsg = data?.error || data?.message || "API request failed";
+      throw new Error(serverMsg);
+    }
 
     let text =
       data.candidates?.[0]?.content?.parts?.[0]?.text ||
@@ -386,6 +394,8 @@ const response = await fetch("/api/gemini", {
       errorMsg = "⏱️ Response took too long. Please try again.";
     } else if (!navigator.onLine) {
       errorMsg = "📡 No internet connection.";
+    } else if (err?.message) {
+      errorMsg = `⚠️ ${err.message}`;
     }
     botText.textContent = errorMsg;
     console.error(err);
