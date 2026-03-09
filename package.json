@@ -1,26 +1,10 @@
 {
-<<<<<<< HEAD
   "dependencies": {
     "@google/genai": "^1.42.0",
-=======
-  "name": "server",
-  "version": "1.0.0",
-  "type": "module",
-  "main": "server.js",
-
-  "overrides": {
-    "minimatch": "^10.2.1",
-    "glob": "^10.6.0",
-    "rimraf": "^5.0.11"
-  },
-
-  "dependencies": {
->>>>>>> bed8911c3ddddd3d9e94316b7edadc80bb34a676
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "node-fetch": "^3.3.2"
-<<<<<<< HEAD
   },
   "devDependencies": {
     "vite": "^7.3.1"
@@ -45,7 +29,3 @@
   },
   "homepage": "https://github.com/Ayush22042004/Aquasafe#readme"
 }
-=======
-  }
-}
->>>>>>> bed8911c3ddddd3d9e94316b7edadc80bb34a676
