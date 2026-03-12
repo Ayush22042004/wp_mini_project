@@ -1,5 +1,56 @@
 // AquaSave - Main JavaScript
 
+const DEMO_LOCATION = {
+  lat: 19.076,
+  lng: 72.8777,
+  label: "Mumbai demo area",
+};
+
+const FALLBACK_CALCULATOR_METADATA = {
+  lastReviewed: "2026-03-12",
+  benchmarks: {
+    globalAverageLitresPerPersonDay: 135,
+  },
+  factors: {
+    showerLitresPerMinute: 9.5,
+    bathLitresPerBath: 135,
+    toiletFlushLitres: {
+      modern: 4.8,
+      dual: 3.6,
+      old: 22.7,
+    },
+    sinkTapLitresPerMinute: 8.3,
+    dishwasherLitresPerLoad: 15,
+    laundryLitresPerLoad: {
+      front: 50,
+      top: 85,
+      semi: 65,
+    },
+    gardenWateringLitresPerMinute: 15,
+  },
+  sources: [],
+};
+
+let calculatorMetadata = FALLBACK_CALCULATOR_METADATA;
+let latestCalculatorResult = null;
+let currentQuestionIndex = 0;
+let quizScore = 0;
+let quizQuestions = [];
+let currentQuizMode = "curated";
+let currentQuizNotice = "";
+let questionTimer = null;
+let timeLeft = 15;
+let bestScore = Number(localStorage.getItem("aquasave-best-score") || 0);
+const QUESTIONS_PER_QUIZ = 6;
+const QUESTION_TIME = 15;
+const nearbyState = {
+  map: null,
+  reportsLayer: null,
+  userMarker: null,
+  currentPosition: null,
+  reports: [],
+};
+
 document.addEventListener("DOMContentLoaded", () => {
   initNavigation();
   initCalculator();
@@ -9,23 +60,22 @@ document.addEventListener("DOMContentLoaded", () => {
   initContactForm();
   initQuiz();
   initLeaderboard();
+  initNearbyReportsMap();
   initAIAssistant();
+  initShareActions();
 });
 
-/* =====================================================
-   NAVIGATION
-===================================================== */
 function initNavigation() {
   const mobileMenuBtn = document.querySelector(".mobile-menu-btn");
   const navLinks = document.querySelector(".nav-links");
 
-  if (!mobileMenuBtn || !navLinks) return;
+  if (!mobileMenuBtn || !navLinks) {
+    return;
+  }
 
   mobileMenuBtn.addEventListener("click", () => {
     navLinks.classList.toggle("active");
-    mobileMenuBtn.textContent = navLinks.classList.contains("active")
-      ? "✕"
-      : "☰";
+    mobileMenuBtn.textContent = navLinks.classList.contains("active") ? "X" : "☰";
   });
 
   document.querySelectorAll(".nav-links a").forEach((link) => {
@@ -37,18 +87,29 @@ function initNavigation() {
 
   window.addEventListener("scroll", () => {
     const navbar = document.querySelector(".navbar");
-    if (!navbar) return;
+    if (!navbar) {
+      return;
+    }
     navbar.classList.toggle("scrolled", window.scrollY > 50);
+
+    // highlight active nav link based on scroll position
+    const sections = document.querySelectorAll("section[id]");
+    const links = document.querySelectorAll(".nav-links a");
+    let currentId = "";
+    sections.forEach((section) => {
+      if (window.scrollY >= section.offsetTop - 120) {
+        currentId = section.getAttribute("id");
+      }
+    });
+    links.forEach((link) => {
+      link.classList.toggle("active", link.getAttribute("href") === `#${currentId}`);
+    });
   });
 }
 
-/* =====================================================
-   WATER CALCULATOR
-===================================================== */
 function initCalculator() {
-  const btn = document.getElementById("calculateBtn");
-  // list of all input/select ids used by the calculator
-  const ids = [
+  const calculateBtn = document.getElementById("calculateBtn");
+  const calculatorIds = [
     "household",
     "showers",
     "showerDuration",
@@ -63,227 +124,846 @@ function initCalculator() {
     "watering",
   ];
 
-  if (btn) btn.addEventListener("click", calculateWaterUsage);
+  if (calculateBtn) {
+    calculateBtn.addEventListener("click", calculateWaterUsage);
+  }
 
-  ids.forEach((id) => {
-    const elem = document.getElementById(id);
-    if (elem) {
-      // selects should listen for change, number fields can use input
-      const eventType = elem.tagName.toLowerCase() === "select" ? "change" : "input";
-      elem.addEventListener(eventType, calculateWaterUsage);
+  calculatorIds.forEach((id) => {
+    const element = document.getElementById(id);
+    if (!element) {
+      return;
     }
+    const eventType = element.tagName.toLowerCase() === "select" ? "change" : "input";
+    element.addEventListener(eventType, calculateWaterUsage);
   });
 
-  // perform an initial calculation so results aren't blank when page loads
+  const nativeShareBtn = document.getElementById("nativeShareCalculatorBtn");
+  if (nativeShareBtn) {
+    nativeShareBtn.addEventListener("click", () => handleNativeShare("calculator"));
+  }
+
+  loadCalculatorMetadata();
+}
+
+async function loadCalculatorMetadata() {
+  try {
+    const payload = await apiFetchJson("/api/calculator-metadata");
+    calculatorMetadata = {
+      ...FALLBACK_CALCULATOR_METADATA,
+      ...payload,
+      factors: {
+        ...FALLBACK_CALCULATOR_METADATA.factors,
+        ...payload.factors,
+      },
+    };
+  } catch (error) {
+    console.error("Calculator metadata error:", error);
+  }
+
+  updateCalculatorHelperText();
   calculateWaterUsage();
 }
 
+function updateCalculatorHelperText() {
+  const factors = calculatorMetadata.factors;
+  setText("showerRateValue", `× ${formatNumber(factors.showerLitresPerMinute, 1)} litres/min`);
+  setText("bathHelper", `× ${formatNumber(factors.bathLitresPerBath, 0)} litres each`);
+  setText("tapHelper", `× ${formatNumber(factors.sinkTapLitresPerMinute, 1)} litres/min`);
+  setText("dishwasherHelper", `× ${formatNumber(factors.dishwasherLitresPerLoad, 0)} litres each`);
+  setText("handwashHelper", `× ${formatNumber(factors.sinkTapLitresPerMinute, 1)} litres/min`);
+  setText("wateringHelper", `× ${formatNumber(factors.gardenWateringLitresPerMinute, 0)} litres/min (planning estimate)`);
+  setText("toiletModernOption", `Modern (${formatNumber(factors.toiletFlushLitres.modern, 1)}L/flush)`);
+  setText("toiletDualOption", `Dual-flush (${formatNumber(factors.toiletFlushLitres.dual, 1)}L avg/flush)`);
+  setText("toiletOldOption", `Older toilet (${formatNumber(factors.toiletFlushLitres.old, 1)}L/flush)`);
+  setText("machineFrontOption", `Front-load (${formatNumber(factors.laundryLitresPerLoad.front, 0)}L/load)`);
+  setText("machineTopOption", `Top-load (${formatNumber(factors.laundryLitresPerLoad.top, 0)}L/load)`);
+  setText("machineSemiOption", `Semi-auto (${formatNumber(factors.laundryLitresPerLoad.semi, 0)}L/load)`);
+}
+
 function calculateWaterUsage() {
-  const household = +document.getElementById("household")?.value || 0;
-  const showers = +document.getElementById("showers")?.value || 0;
-  const duration = +document.getElementById("showerDuration")?.value || 0;
-  const baths = +document.getElementById("baths")?.value || 0;
-  const flushes = +document.getElementById("flushes")?.value || 0;
-  const toiletType = document.getElementById("toiletType")?.value || "modern";
-  const brushing = +document.getElementById("brushing")?.value || 0;
-  const dishwasher = +document.getElementById("dishwasher")?.value || 0;
-  const handwashDishes = +document.getElementById("handwashDishes")?.value || 0;
-  const laundry = +document.getElementById("laundry")?.value || 0;
-  const machineType = document.getElementById("machineType")?.value || "front";
-  const watering = +document.getElementById("watering")?.value || 0;
+  const factors = calculatorMetadata.factors;
+  const household = getNumberValue("household");
+  const showers = getNumberValue("showers");
+  const duration = getNumberValue("showerDuration");
+  const baths = getNumberValue("baths");
+  const flushes = getNumberValue("flushes");
+  const toiletType = getSelectValue("toiletType", "modern");
+  const brushing = getNumberValue("brushing");
+  const dishwasher = getNumberValue("dishwasher");
+  const handwashDishes = getNumberValue("handwashDishes");
+  const laundry = getNumberValue("laundry");
+  const machineType = getSelectValue("machineType", "front");
+  const watering = getNumberValue("watering");
 
-  // compute per-person daily usage in litres
   let dailyPerPerson = 0;
-  dailyPerPerson += showers * duration * 9; // shower litres/day
-  dailyPerPerson += (baths * 135) / 7; // baths per week -> per day
-
-  let flushVolume = 6;
-  if (toiletType === "dual") flushVolume = 4;
-  else if (toiletType === "old") flushVolume = 13;
-  dailyPerPerson += flushes * flushVolume;
-
-  dailyPerPerson += brushing * 7.5; // brushing litres
-  dailyPerPerson += (dishwasher * 22) / 7; // dishwasher loads/week -> per day
-  dailyPerPerson += handwashDishes * 9; // hand-washing litres
-
-  let laundryVolume = 60;
-  if (machineType === "top") laundryVolume = 120;
-  else if (machineType === "semi") laundryVolume = 80;
-  dailyPerPerson += (laundry * laundryVolume) / 7; // laundry loads/week -> per day
-
-  dailyPerPerson += (watering * 15) / 7; // watering garden/week -> per day
+  dailyPerPerson += showers * duration * factors.showerLitresPerMinute;
+  dailyPerPerson += (baths * factors.bathLitresPerBath) / 7;
+  dailyPerPerson += flushes * (factors.toiletFlushLitres[toiletType] || factors.toiletFlushLitres.modern);
+  dailyPerPerson += brushing * factors.sinkTapLitresPerMinute;
+  dailyPerPerson += (dishwasher * factors.dishwasherLitresPerLoad) / 7;
+  dailyPerPerson += handwashDishes * factors.sinkTapLitresPerMinute;
+  dailyPerPerson += (laundry * (factors.laundryLitresPerLoad[machineType] || factors.laundryLitresPerLoad.front)) / 7;
+  dailyPerPerson += (watering * factors.gardenWateringLitresPerMinute) / 7;
 
   const dailyTotal = dailyPerPerson * household;
   const monthlyTotal = dailyTotal * 30;
   const yearlyTotal = dailyTotal * 365;
+  const benchmarkPerPerson = calculatorMetadata.benchmarks?.globalAverageLitresPerPersonDay || 135;
+  const benchmarkHousehold = benchmarkPerPerson * Math.max(household, 1);
+
+  latestCalculatorResult = {
+    household,
+    dailyTotal,
+    monthlyTotal,
+    yearlyTotal,
+    benchmarkHousehold,
+  };
 
   animateNumber("dailyUsage", dailyTotal);
   animateNumber("monthlyUsage", monthlyTotal);
   animateNumber("yearlyUsage", yearlyTotal);
+  renderCalculatorFeedback(dailyTotal, benchmarkHousehold);
+  renderCalculatorSources();
+}
 
+function renderCalculatorFeedback(dailyTotal, benchmarkHousehold) {
+  const comparisonText = document.getElementById("comparisonText");
   const feedback = document.getElementById("feedback");
-  if (feedback) {
-    if (dailyTotal < 50) {
-      feedback.textContent =
-        "Excellent! You're a water conservation champion!";
-      feedback.style.color = "#27ae60";
-    } else if (dailyTotal < 100) {
-      feedback.textContent =
-        "Good! Keep up with your water conservation efforts.";
-      feedback.style.color = "#3498db";
-    } else {
-      feedback.textContent =
-        "Try to reduce your daily water usage with our tips!";
-      feedback.style.color = "#e74c3c";
-    }
+  if (!comparisonText || !feedback) {
+    return;
+  }
+
+  const difference = Math.round(dailyTotal - benchmarkHousehold);
+  if (difference <= -20) {
+    comparisonText.textContent = `Your estimated household use is ${Math.abs(difference)} litres/day below the comparison benchmark of ${Math.round(benchmarkHousehold)} litres/day.`;
+    feedback.textContent = "Strong result. Keep these habits and share what is working in your home.";
+    feedback.style.color = "#1d8348";
+  } else if (difference <= 20) {
+    comparisonText.textContent = `Your estimated household use is close to the comparison benchmark of ${Math.round(benchmarkHousehold)} litres/day.`;
+    feedback.textContent = "You are near the benchmark. Small daily changes can still cut meaningful water use.";
+    feedback.style.color = "#2980b9";
+  } else {
+    comparisonText.textContent = `Your estimated household use is about ${difference} litres/day above the comparison benchmark of ${Math.round(benchmarkHousehold)} litres/day.`;
+    feedback.textContent = "There is room to reduce your footprint. Shorter showers and leak fixes usually have the fastest impact.";
+    feedback.style.color = "#c0392b";
   }
 }
 
-function animateNumber(id, value) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.textContent = Math.round(value).toLocaleString();
+function renderCalculatorSources() {
+  const list = document.getElementById("calculatorSourcesList");
+  const summary = document.getElementById("calculatorSourceSummary");
+  if (!list || !summary) {
+    return;
+  }
+
+  const usedEntries = getActiveCalculatorSources();
+  summary.textContent = `Last reviewed ${calculatorMetadata.lastReviewed}. Green items are directly source-backed figures. Amber items are explicit AquaSave planning assumptions.`;
+
+  list.innerHTML = usedEntries
+    .map((entry) => `
+      <article class="source-item">
+        <div class="source-item-header">
+          <strong>${escapeHtml(entry.label)}</strong>
+          <span class="source-tag ${entry.verified ? "" : "estimated"}">${entry.verified ? "Verified" : "Estimate"}</span>
+        </div>
+        <p>${escapeHtml(entry.figure)}</p>
+        ${entry.note ? `<p>${escapeHtml(entry.note)}</p>` : ""}
+        <a href="${entry.url}" target="_blank" rel="noreferrer">${escapeHtml(entry.organization)}: ${escapeHtml(entry.title)}</a>
+      </article>
+    `)
+    .join("");
 }
 
-/* =====================================================
-   TIPS
-===================================================== */
+function getActiveCalculatorSources() {
+  const toiletType = getSelectValue("toiletType", "modern");
+  const machineType = getSelectValue("machineType", "front");
+  const requiredKeys = new Set([
+    "showerLitresPerMinute",
+    "bathLitresPerBath",
+    `toiletFlushLitres.${toiletType}`,
+    "sinkTapLitresPerMinute",
+    "dishwasherLitresPerLoad",
+    `laundryLitresPerLoad.${machineType}`,
+    "gardenWateringLitresPerMinute",
+  ]);
+
+  return (calculatorMetadata.sources || []).filter((entry) =>
+    entry.appliesTo?.some((item) => requiredKeys.has(item))
+  );
+}
+
 function initTips() {
-  const tabBtns = document.querySelectorAll(".tab-btn");
+  const tabButtons = document.querySelectorAll(".tab-btn");
   const panels = document.querySelectorAll(".tip-panel");
 
-  tabBtns.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      tabBtns.forEach((b) => b.classList.remove("active"));
-      panels.forEach((p) => p.classList.remove("active"));
-
-      btn.classList.add("active");
-      const panel = document.getElementById(btn.dataset.tab);
-      if (panel) panel.classList.add("active");
+  tabButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      tabButtons.forEach((candidate) => candidate.classList.remove("active"));
+      panels.forEach((panel) => panel.classList.remove("active"));
+      button.classList.add("active");
+      const panel = document.getElementById(button.dataset.tab);
+      if (panel) {
+        panel.classList.add("active");
+      }
     });
   });
 
-  if (tabBtns.length) tabBtns[0].click();
+  if (tabButtons.length) {
+    tabButtons[0].click();
+  }
 }
 
-/* =====================================================
-   CHECKLIST
-===================================================== */
 function initChecklist() {
   loadChecklistState();
   updateProgress();
 
-  document
-    .querySelectorAll('.checklist-item input[type="checkbox"]')
-    .forEach((cb) => {
-      cb.addEventListener("change", () => {
-        updateProgress();
-        saveChecklistState();
-      });
+  document.querySelectorAll('.checklist-item input[type="checkbox"]').forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      updateProgress();
+      saveChecklistState();
     });
+  });
 }
 
 function updateProgress() {
-  const boxes = document.querySelectorAll(
-    '.checklist-item input[type="checkbox"]'
-  );
-  const percentEl = document.getElementById("progressPercent");
-  const savingsEl = document.getElementById("potentialSavings");
+  const boxes = document.querySelectorAll('.checklist-item input[type="checkbox"]');
+  const percentElement = document.getElementById("progressPercent");
+  const savingsElement = document.getElementById("potentialSavings");
 
   let checked = 0;
   let savings = 0;
-
-  boxes.forEach((b) => {
-    if (b.checked) {
-      checked++;
-      savings += +b.closest(".checklist-item")?.dataset?.savings || 0;
+  boxes.forEach((box) => {
+    if (box.checked) {
+      checked += 1;
+      savings += Number(box.closest(".checklist-item")?.dataset?.savings || 0);
     }
   });
 
-  const percent = boxes.length
-    ? Math.round((checked / boxes.length) * 100)
-    : 0;
+  const percent = boxes.length ? Math.round((checked / boxes.length) * 100) : 0;
+  if (percentElement) {
+    percentElement.textContent = String(percent);
+  }
+  if (savingsElement) {
+    savingsElement.textContent = `${savings} litres`;
+  }
 
-  if (percentEl) percentEl.textContent = percent;
-  if (savingsEl) savingsEl.textContent = savings + " litres";
-
-  const circle = document.querySelector(".progress-circle circle:nth-child(2)");
+  const circle = document.getElementById("progressCircle");
   if (circle) {
-    const circumference = 2 * Math.PI * 45;
-    circle.style.strokeDashoffset =
-      circumference - (percent / 100) * circumference;
+    const circumference = 2 * Math.PI * 65;
+    circle.style.strokeDasharray = String(circumference);
+    circle.style.strokeDashoffset = String(circumference - (percent / 100) * circumference);
   }
 }
 
 function saveChecklistState() {
   const state = {};
-  document
-    .querySelectorAll('.checklist-item input[type="checkbox"]')
-    .forEach((cb) => (state[cb.id] = cb.checked));
-
+  document.querySelectorAll('.checklist-item input[type="checkbox"]').forEach((checkbox) => {
+    state[checkbox.id] = checkbox.checked;
+  });
   localStorage.setItem("aquasave-checklist", JSON.stringify(state));
 }
 
 function loadChecklistState() {
-  const data = localStorage.getItem("aquasave-checklist");
-  if (!data) return;
-
-  const state = JSON.parse(data);
-  Object.keys(state).forEach((id) => {
-    const cb = document.getElementById(id);
-    if (cb) cb.checked = state[id];
+  const raw = localStorage.getItem("aquasave-checklist");
+  if (!raw) {
+    return;
+  }
+  const state = JSON.parse(raw);
+  Object.entries(state).forEach(([id, checked]) => {
+    const checkbox = document.getElementById(id);
+    if (checkbox) {
+      checkbox.checked = Boolean(checked);
+    }
   });
 }
 
-/* =====================================================
-   SCROLL EFFECTS
-===================================================== */
 function initScrollEffects() {
   const observer = new IntersectionObserver(
     (entries) => {
-      entries.forEach((e) => {
-        if (e.isIntersecting) e.target.classList.add("visible");
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("visible");
+        }
       });
     },
     { threshold: 0.1 }
   );
 
-  document
-    .querySelectorAll(".fact-card, .tip-item, .resource-card")
-    .forEach((el) => observer.observe(el));
+  document.querySelectorAll(".fact-card, .tip-item, .resource-card").forEach((element) => {
+    observer.observe(element);
+  });
 }
 
-/* =====================================================
-   CONTACT FORM
-===================================================== */
 function initContactForm() {
   const form = document.getElementById("contactForm");
-  if (!form) return;
+  const message = document.getElementById("contactMessage");
+  const charCount = document.getElementById("charCount");
 
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
+  if (message && charCount) {
+    const updateCount = () => {
+      charCount.textContent = String(message.value.length);
+    };
+    message.addEventListener("input", updateCount);
+    updateCount();
+  }
 
+  if (!form) {
+    return;
+  }
+
+  form.addEventListener("submit", (event) => {
     const name = document.getElementById("contactName")?.value.trim();
     const email = document.getElementById("contactEmail")?.value.trim();
-    const message = document.getElementById("contactMessage")?.value.trim();
+    const content = document.getElementById("contactMessage")?.value.trim();
 
-    if (!name || !email || !message) {
-      alert("Please fill all fields");
+    if (!name || !email || !content) {
+      event.preventDefault();
+      alert("Please fill all required fields.");
       return;
     }
 
     if (!email.includes("@")) {
-      alert("Please enter a valid email");
-      return;
+      event.preventDefault();
+      alert("Please enter a valid email address.");
     }
-
-    form.submit();
   });
 }
 
-/* =====================================================
-   🤖 AI ASSISTANT — WORKING VERSION
-===================================================== */
+function initQuiz() {
+  const startBtn = document.getElementById("startQuizBtn");
+  if (!startBtn) {
+    return;
+  }
+
+  startBtn.addEventListener("click", () => {
+    const mode = Math.random() < 0.5 ? "curated" : "ai";
+    startQuiz(mode);
+  });
+}
+
+function initLeaderboard() {
+  if (document.getElementById("leaderboard-list")) {
+    renderLeaderboard();
+  }
+}
+
+async function startQuiz(mode = "curated") {
+  const container = document.getElementById("quiz-container");
+  if (!container) {
+    return;
+  }
+
+  currentQuizMode = mode;
+  currentQuestionIndex = 0;
+  quizScore = 0;
+  clearInterval(questionTimer);
+
+  container.innerHTML = `<p class="quiz-note">Loading questions...</p>`;
+
+  try {
+    const payload = await apiFetchJson(`/api/quiz/questions?count=${QUESTIONS_PER_QUIZ}&mode=${mode}`);
+    quizQuestions = Array.isArray(payload.questions) ? payload.questions : [];
+    currentQuizMode = payload.mode || mode;
+    currentQuizNotice = payload.notice || "";
+
+    if (!quizQuestions.length) {
+      throw new Error("No questions were returned.");
+    }
+
+    showQuestion();
+  } catch (error) {
+    console.error("Quiz start error:", error);
+    container.innerHTML = `
+      <div class="quiz-complete">
+        <h3>Quiz unavailable</h3>
+        <p class="quiz-note">${escapeHtml(error.message || "The quiz API did not respond.")}</p>
+        <div class="quiz-complete-actions">
+          <button class="secondary-action-btn" type="button" id="retryQuizBtn">Try Again</button>
+        </div>
+      </div>
+    `;
+    document.getElementById("retryQuizBtn")?.addEventListener("click", () => startQuiz(mode));
+  }
+}
+
+function showQuestion() {
+  const container = document.getElementById("quiz-container");
+  if (!container) {
+    return;
+  }
+
+  clearInterval(questionTimer);
+  timeLeft = QUESTION_TIME;
+  const question = quizQuestions[currentQuestionIndex];
+
+  container.innerHTML = `
+    <div class="quiz-topbar">
+      <div>Question ${currentQuestionIndex + 1}/${QUESTIONS_PER_QUIZ}</div>
+      <div><span id="timer">${timeLeft}</span>s</div>
+    </div>
+    <div class="progress-bar">
+      <div class="progress-fill" style="width:${(currentQuestionIndex / QUESTIONS_PER_QUIZ) * 100}%"></div>
+    </div>
+    <p class="question-text">${escapeHtml(question.question)}</p>
+    <div class="options-grid">
+      ${question.options
+        .map((option, index) => `<button class="option-btn" data-index="${index}" type="button">${escapeHtml(option)}</button>`)
+        .join("")}
+    </div>
+    <button id="nextQuestionBtn" type="button" disabled>Next Question</button>
+    <p class="quiz-note">${escapeHtml(currentQuizNotice || `Mode: ${currentQuizMode}`)}${question.source ? ` Source cue: ${escapeHtml(question.source)}` : ""}</p>
+  `;
+
+  questionTimer = setInterval(updateTimer, 1000);
+  container.querySelectorAll(".option-btn").forEach((button) => {
+    button.addEventListener("click", () => selectOption(button));
+  });
+  document.getElementById("nextQuestionBtn")?.addEventListener("click", nextQuestion);
+}
+
+function updateTimer() {
+  timeLeft -= 1;
+  const timer = document.getElementById("timer");
+  if (timer) {
+    timer.textContent = String(Math.max(timeLeft, 0));
+  }
+  if (timeLeft <= 0) {
+    handleTimeout();
+  }
+}
+
+function handleTimeout() {
+  clearInterval(questionTimer);
+  const container = document.getElementById("quiz-container");
+  if (!container) {
+    return;
+  }
+
+  container.querySelectorAll(".option-btn").forEach((button, index) => {
+    button.disabled = true;
+    if (index === quizQuestions[currentQuestionIndex].answer) {
+      button.classList.add("correct");
+    }
+  });
+
+  setTimeout(() => {
+    document.getElementById("nextQuestionBtn")?.removeAttribute("disabled");
+    nextQuestion();
+  }, 1400);
+}
+
+function selectOption(button) {
+  const grid = button.closest(".options-grid");
+  if (!grid || grid.classList.contains("locked")) {
+    return;
+  }
+
+  clearInterval(questionTimer);
+  grid.classList.add("locked");
+
+  const selectedIndex = Number(button.dataset.index);
+  const correctIndex = Number(quizQuestions[currentQuestionIndex].answer);
+  const isCorrect = selectedIndex === correctIndex;
+
+  grid.querySelectorAll(".option-btn").forEach((candidate, index) => {
+    candidate.disabled = true;
+    if (index === correctIndex) {
+      candidate.classList.add("correct");
+    }
+  });
+
+  if (!isCorrect) {
+    button.classList.add("incorrect");
+  } else {
+    quizScore += 1;
+  }
+
+  document.getElementById("nextQuestionBtn")?.removeAttribute("disabled");
+}
+
+function nextQuestion() {
+  currentQuestionIndex += 1;
+  if (currentQuestionIndex < QUESTIONS_PER_QUIZ) {
+    showQuestion();
+  } else {
+    finishQuiz();
+  }
+}
+
+function finishQuiz() {
+  const container = document.getElementById("quiz-container");
+  if (!container) {
+    return;
+  }
+
+  const finalScore = Math.round(quizScore * 100) / 100;
+  if (finalScore > bestScore) {
+    bestScore = finalScore;
+    localStorage.setItem("aquasave-best-score", String(bestScore));
+  }
+
+  container.innerHTML = `
+    <div class="quiz-complete" style="text-align:center;">
+      <h3>Quiz Complete</h3>
+      <p style="font-size:2em;margin:20px 0;">Score: <strong>${finalScore}/${QUESTIONS_PER_QUIZ}</strong></p>
+      <p class="quiz-note">Mode used: ${escapeHtml(currentQuizMode)}. ${escapeHtml(currentQuizNotice || "Questions were served by the API.")}</p>
+      <p class="quiz-note">Best local score on this device: ${bestScore}/${QUESTIONS_PER_QUIZ}</p>
+      <div id="nameEntry" style="margin-top:20px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+        <input id="playerName" type="text" placeholder="Enter your name" maxlength="20" style="padding:8px 12px;border-radius:var(--border-radius);border:1px solid #ccc;width:220px;">
+        <button id="saveNameBtn" class="secondary-action-btn" type="button">Save to Leaderboard</button>
+      </div>
+      <p id="quizSaveStatus" class="inline-status"></p>
+      <div class="quiz-complete-actions">
+        <button id="nativeShareQuizBtn" class="secondary-action-btn" type="button">Share Result</button>
+        <button class="share-btn" type="button" data-context="quiz" data-platform="whatsapp" title="WhatsApp"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg></button>
+        <button class="share-btn" type="button" data-context="quiz" data-platform="x" title="X"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></button>
+        <button class="share-btn" type="button" data-context="quiz" data-platform="facebook" title="Facebook"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg></button>
+        <button class="share-btn" type="button" data-context="quiz" data-platform="linkedin" title="LinkedIn"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg></button>
+        <button class="share-btn" type="button" data-context="quiz" data-platform="copy" title="Copy Summary"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
+      </div>
+      <div id="postSave" style="margin-top:15px;">
+        <button id="playAgainBtn" class="secondary-action-btn" type="button">Play Again</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("saveNameBtn")?.addEventListener("click", async () => {
+    const playerName = document.getElementById("playerName")?.value.trim() || "Anonymous";
+    await submitQuizScore(playerName, finalScore);
+  });
+  document.getElementById("playAgainBtn")?.addEventListener("click", () => {
+    const mode = Math.random() < 0.5 ? "curated" : "ai";
+    startQuiz(mode);
+  });
+  document.getElementById("nativeShareQuizBtn")?.addEventListener("click", () => handleNativeShare("quiz"));
+}
+
+async function submitQuizScore(name, score) {
+  try {
+    const payload = await apiFetchJson("/api/quiz/submit-score", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        score,
+        totalQuestions: QUESTIONS_PER_QUIZ,
+        mode: currentQuizMode,
+      }),
+    });
+
+    setStatus("quizSaveStatus", `Saved. ${name} is now on the API leaderboard.`, "success");
+    renderLeaderboard(payload.leaderboard);
+  } catch (error) {
+    console.error("Quiz save error:", error);
+    setStatus("quizSaveStatus", error.message || "Unable to save score.", "error");
+  }
+}
+
+async function renderLeaderboard(existingLeaderboard) {
+  const leaderboardElement = document.getElementById("leaderboard-list");
+  if (!leaderboardElement) {
+    return;
+  }
+
+  try {
+    const leaderboard = existingLeaderboard || (await apiFetchJson("/api/quiz/leaderboard")).leaderboard;
+    if (!Array.isArray(leaderboard) || !leaderboard.length) {
+      leaderboardElement.innerHTML = "<li>No scores yet. Be the first!</li>";
+      return;
+    }
+
+    leaderboardElement.innerHTML = leaderboard
+      .slice(0, 10)
+      .map((entry, index) => `<li>${index + 1}. ${escapeHtml(entry.name)} — ${entry.score}/${entry.totalQuestions || QUESTIONS_PER_QUIZ}</li>`)
+      .join("");
+  } catch (error) {
+    console.error("Leaderboard render error:", error);
+    leaderboardElement.innerHTML = "<li>Leaderboard is temporarily unavailable.</li>";
+  }
+}
+
+function initNearbyReportsMap() {
+  const locateButton = document.getElementById("locateReportsBtn");
+  const demoButton = document.getElementById("useDemoLocationBtn");
+  const radiusSelect = document.getElementById("reportRadius");
+  const reportForm = document.getElementById("reportIssueForm");
+
+  if (!locateButton) {
+    return;
+  }
+
+  locateButton.addEventListener("click", requestUserLocation);
+  demoButton?.addEventListener("click", () => useKnownLocation(DEMO_LOCATION, true));
+  radiusSelect?.addEventListener("change", () => {
+    if (nearbyState.currentPosition) {
+      loadNearbyReports();
+    }
+  });
+  reportForm?.addEventListener("submit", submitNearbyReport);
+}
+
+function requestUserLocation() {
+  if (!navigator.geolocation) {
+    setStatus("reportsStatus", "Geolocation is not supported in this browser. Opening the demo area instead.", "error");
+    useKnownLocation(DEMO_LOCATION, true);
+    return;
+  }
+
+  setStatus("reportsStatus", "Requesting your location...", "");
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      useKnownLocation(
+        {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          label: "Your location",
+        },
+        false
+      );
+    },
+    () => {
+      setStatus("reportsStatus", "Location permission was denied. The demo area is open so you can still test the feature.", "error");
+      useKnownLocation(DEMO_LOCATION, true);
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+    }
+  );
+}
+
+function useKnownLocation(location, isDemo) {
+  nearbyState.currentPosition = location;
+  ensureReportsMap(location);
+  setStatus(
+    "reportsStatus",
+    isDemo
+      ? `Showing demo reports near ${location.label}.`
+      : `Showing nearby reports around ${location.label}.`,
+    isDemo ? "" : "success"
+  );
+  loadNearbyReports();
+}
+
+function ensureReportsMap(location) {
+  if (!window.L) {
+    setStatus("reportsStatus", "Map library did not load.", "error");
+    return;
+  }
+
+  if (!nearbyState.map) {
+    nearbyState.map = window.L.map("reportsMap", { scrollWheelZoom: true }).setView([location.lat, location.lng], 14);
+    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(nearbyState.map);
+    nearbyState.reportsLayer = window.L.layerGroup().addTo(nearbyState.map);
+  } else {
+    nearbyState.map.setView([location.lat, location.lng], 14);
+  }
+
+  if (nearbyState.userMarker) {
+    nearbyState.userMarker.setLatLng([location.lat, location.lng]);
+  } else {
+    nearbyState.userMarker = window.L.marker([location.lat, location.lng]).addTo(nearbyState.map);
+  }
+
+  nearbyState.userMarker.bindPopup(location.label).openPopup();
+}
+
+async function loadNearbyReports() {
+  if (!nearbyState.currentPosition) {
+    return;
+  }
+
+  const radiusKm = getNumberValue("reportRadius") || 5;
+  const { lat, lng } = nearbyState.currentPosition;
+
+  try {
+    const payload = await apiFetchJson(`/api/wastage-reports?lat=${lat}&lng=${lng}&radiusKm=${radiusKm}`);
+    nearbyState.reports = Array.isArray(payload.reports) ? payload.reports : [];
+    renderNearbyReports(payload.meta || {});
+  } catch (error) {
+    console.error("Nearby reports error:", error);
+    setStatus("reportsStatus", error.message || "Unable to load nearby reports.", "error");
+  }
+}
+
+function renderNearbyReports(meta) {
+  const list = document.getElementById("reportsList");
+  const countBadge = document.getElementById("reportsCountBadge");
+  if (!list || !countBadge) {
+    return;
+  }
+
+  countBadge.textContent = String(nearbyState.reports.length);
+  if (nearbyState.reportsLayer) {
+    nearbyState.reportsLayer.clearLayers();
+  }
+
+  if (!nearbyState.reports.length) {
+    list.innerHTML = '<p class="empty-state">No nearby reports were found in this radius yet. Try a larger radius or submit the first one.</p>';
+    return;
+  }
+
+  list.innerHTML = nearbyState.reports
+    .map((report) => `
+      <article class="report-card">
+        <div class="report-card-header">
+          <h4>${escapeHtml(report.type)}</h4>
+          <span class="status-pill ${String(report.status || "").toLowerCase().includes("invest") ? "investigating" : ""}">${escapeHtml(report.status || "Open")}</span>
+        </div>
+        <p>${escapeHtml(report.description)}</p>
+        <p class="report-meta">${report.distanceKm != null ? `${formatNumber(report.distanceKm, 1)} km away` : "Distance unavailable"} · ${formatDate(report.createdAt)}</p>
+        <span class="source-pill">${escapeHtml(report.source || "Community report")}</span>
+      </article>
+    `)
+    .join("");
+
+  nearbyState.reports.forEach((report) => {
+    if (!nearbyState.reportsLayer) {
+      return;
+    }
+    const marker = window.L.marker([report.lat, report.lng]);
+    marker.bindPopup(`
+      <strong>${escapeHtml(report.type)}</strong><br>
+      ${escapeHtml(report.description)}<br>
+      <small>${escapeHtml(report.source || "Community report")}</small>
+    `);
+    nearbyState.reportsLayer.addLayer(marker);
+  });
+
+  setStatus(
+    "reportsStatus",
+    `Loaded ${nearbyState.reports.length} reports in the selected radius. Community reports are always available. External feed results appear only when the server has a configured dataset.`,
+    "success"
+  );
+}
+
+async function submitNearbyReport(event) {
+  event.preventDefault();
+  if (!nearbyState.currentPosition) {
+    setStatus("reportSubmitStatus", "Choose your location or the demo area before submitting a report.", "error");
+    return;
+  }
+
+  const type = getSelectValue("reportType");
+  const description = document.getElementById("reportDescription")?.value.trim();
+  if (!type || !description) {
+    setStatus("reportSubmitStatus", "Please choose an issue type and add a description.", "error");
+    return;
+  }
+
+  try {
+    await apiFetchJson("/api/wastage-reports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type,
+        description,
+        lat: nearbyState.currentPosition.lat,
+        lng: nearbyState.currentPosition.lng,
+      }),
+    });
+
+    document.getElementById("reportIssueForm")?.reset();
+    setStatus("reportSubmitStatus", "Report submitted. It now appears in the nearby feed.", "success");
+    loadNearbyReports();
+  } catch (error) {
+    console.error("Report submit error:", error);
+    setStatus("reportSubmitStatus", error.message || "Unable to save your report.", "error");
+  }
+}
+
+function initShareActions() {
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest(".share-btn");
+    if (!button) {
+      return;
+    }
+    const { context, platform } = button.dataset;
+    shareByPlatform(context, platform);
+  });
+}
+
+async function handleNativeShare(context) {
+  const payload = buildSharePayload(context);
+  if (!payload) {
+    return;
+  }
+
+  if (navigator.share) {
+    try {
+      await navigator.share(payload);
+      setStatus(context === "calculator" ? "calculatorShareStatus" : "quizSaveStatus", "Share sheet opened.", "success");
+      return;
+    } catch (error) {
+      if (error?.name !== "AbortError") {
+        console.error("Native share error:", error);
+      }
+    }
+  }
+
+  shareByPlatform(context, "copy");
+}
+
+async function shareByPlatform(context, platform) {
+  const payload = buildSharePayload(context);
+  if (!payload) {
+    return;
+  }
+
+  const statusId = context === "calculator" ? "calculatorShareStatus" : "quizSaveStatus";
+  const text = `${payload.text} ${payload.url}`;
+
+  if (platform === "copy") {
+    const copied = await copyText(text);
+    setStatus(statusId, copied ? "Summary copied to clipboard." : "Copy failed. Select and copy manually.", copied ? "success" : "error");
+    return;
+  }
+
+  const encodedText = encodeURIComponent(text);
+  const encodedUrl = encodeURIComponent(payload.url);
+  let targetUrl = "";
+
+  if (platform === "whatsapp") {
+    targetUrl = `https://wa.me/?text=${encodedText}`;
+  } else if (platform === "x") {
+    targetUrl = `https://twitter.com/intent/tweet?text=${encodedText}`;
+  } else if (platform === "facebook") {
+    targetUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`;
+  } else if (platform === "linkedin") {
+    targetUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`;
+  }
+
+  if (targetUrl) {
+    window.open(targetUrl, "_blank", "noopener,noreferrer");
+    setStatus(statusId, "Share window opened.", "success");
+  }
+}
+
+function buildSharePayload(context) {
+  if (context === "calculator" && latestCalculatorResult) {
+    const summary = `My AquaSave estimate is ${Math.round(latestCalculatorResult.dailyTotal)} litres/day and ${Math.round(latestCalculatorResult.yearlyTotal).toLocaleString()} litres/year for a ${latestCalculatorResult.household}-person household.`;
+    return {
+      title: "AquaSave Water Footprint",
+      text: summary,
+      url: `${window.location.origin}${window.location.pathname}#calculator`,
+    };
+  }
+
+  if (context === "quiz") {
+    const summary = `I scored ${quizScore}/${QUESTIONS_PER_QUIZ} on the AquaSave ${currentQuizMode} water quiz.`;
+    return {
+      title: "AquaSave Quiz Result",
+      text: summary,
+      url: `${window.location.origin}${window.location.pathname}#quiz`,
+    };
+  }
+
+  return null;
+}
+
 function initAIAssistant() {
   const toggleBtn = document.getElementById("aiToggleBtn");
   const closeBtn = document.getElementById("aiCloseBtn");
@@ -291,11 +971,15 @@ function initAIAssistant() {
   const sendBtn = document.getElementById("aiSendBtn");
   const input = document.getElementById("aiInput");
 
-  if (!toggleBtn || !closeBtn || !chatBox || !sendBtn || !input) return;
+  if (!toggleBtn || !closeBtn || !chatBox || !sendBtn || !input) {
+    return;
+  }
 
   toggleBtn.addEventListener("click", () => {
     chatBox.classList.toggle("active");
-    if (chatBox.classList.contains("active")) input.focus();
+    if (chatBox.classList.contains("active")) {
+      input.focus();
+    }
   });
 
   closeBtn.addEventListener("click", () => {
@@ -303,8 +987,10 @@ function initAIAssistant() {
   });
 
   sendBtn.addEventListener("click", sendAIMessage);
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") sendAIMessage();
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      sendAIMessage();
+    }
   });
 }
 
@@ -312,11 +998,12 @@ async function sendAIMessage() {
   const input = document.getElementById("aiInput");
   const messages = document.getElementById("aiMessages");
   const sendBtn = document.getElementById("aiSendBtn");
+  const message = input?.value.trim();
 
-  const message = input.value.trim();
-  if (!message) return;
+  if (!message || !messages || !sendBtn || !input) {
+    return;
+  }
 
-  // user bubble
   const userDiv = document.createElement("div");
   userDiv.className = "ai-message user-message";
   userDiv.innerHTML = `<p>${escapeHtml(message)}</p>`;
@@ -325,506 +1012,124 @@ async function sendAIMessage() {
   input.value = "";
   sendBtn.disabled = true;
 
-  // bot bubble with spinner
   const botDiv = document.createElement("div");
   botDiv.className = "ai-message bot-message";
   const botText = document.createElement("p");
-  botText.innerHTML = '<span style="display:inline-block;animation:spin 1s linear infinite;">⏳</span> Thinking...';
+  botText.textContent = "Thinking...";
   botDiv.appendChild(botText);
   messages.appendChild(botDiv);
   messages.scrollTop = messages.scrollHeight;
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 second timeout
-    
-const response = await fetch("/api/gemini", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ message }),
-  signal: controller.signal,
-});
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const response = await fetch("/api/gemini", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+      signal: controller.signal,
+    });
     clearTimeout(timeoutId);
 
-    let data = null;
-    try {
-      data = await response.json();
-    } catch {
-      // Non-JSON errors still get a generic message below.
-    }
-
+    const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const serverMsg =
-        data?.error ||
-        data?.message ||
-        `API request failed (${response.status})`;
-      throw new Error(serverMsg);
+      throw new Error(data?.error || `API request failed (${response.status})`);
     }
 
-    let text =
-      data.candidates?.[0]?.content?.parts?.[0]?.text ||
-      "No response received.";
-
-    // remove leading/trailing quotation marks if any
+    let text = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response received.";
     text = text.replace(/^['"]+|['"]+$/g, "");
-    // replace markdown headings with placeholders before escaping
-    text = text.replace(/^### (.*?)$/gm, '___H3_START___$1___H3_END___');
-    text = text.replace(/^## (.*?)$/gm, '___H2_START___$1___H2_END___');
-    text = text.replace(/^# (.*?)$/gm, '___H1_START___$1___H1_END___');
-    // replace ** markers with placeholders before escaping
-    text = text.replace(/\*\*(.*?)\*\*/g, '___BOLD_START___$1___BOLD_END___');
-    // italic markers *text* can be removed or converted if needed
-    text = text.replace(/\*(.*?)\*/g, '$1');
-    // if the response is all caps, convert to sentence case
-    if (text && text === text.toUpperCase()) {
-      text = text.toLowerCase();
-      text = text.charAt(0).toUpperCase() + text.slice(1);
-    }
-
-    // escape the text (safe for display)
-    text = escapeHtml(text);
-    // now replace placeholders with actual HTML tags
-    text = text.replace(/___H3_START___(.*?)___H3_END___/g, '<h3 style="margin-top:10px;margin-bottom:5px;font-weight:600;">$1</h3>');
-    text = text.replace(/___H2_START___(.*?)___H2_END___/g, '<h2 style="margin-top:10px;margin-bottom:5px;font-weight:700;">$1</h2>');
-    text = text.replace(/___H1_START___(.*?)___H1_END___/g, '<h1 style="margin-top:10px;margin-bottom:5px;font-weight:700;">$1</h1>');
-    text = text.replace(/___BOLD_START___/g, '<strong>');
-    text = text.replace(/___BOLD_END___/g, '</strong>');
-    // set as HTML and convert newlines to breaks
-    botText.innerHTML = text.replace(/\n/g, "<br>");
-  } catch (err) {
-    let errorMsg = "⚠️ Error connecting to AI.";
-    if (err.name === "AbortError") {
-      errorMsg = "⏱️ Response took too long. Please try again.";
+    text = escapeHtml(text).replace(/\n/g, "<br>");
+    botText.innerHTML = text;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      botText.textContent = "Response took too long. Please try again.";
     } else if (!navigator.onLine) {
-      errorMsg = "📡 No internet connection.";
-    } else if (err?.message) {
-      errorMsg = `⚠️ ${err.message}`;
+      botText.textContent = "No internet connection.";
+    } else {
+      botText.textContent = error.message || "Error connecting to AI.";
     }
-    botText.textContent = errorMsg;
-    console.error(err);
+    console.error(error);
   }
 
   sendBtn.disabled = false;
   messages.scrollTop = messages.scrollHeight;
 }
 
-/* =====================================================
-   UTILS
-===================================================== */
+async function apiFetchJson(url, options) {
+  const response = await fetch(url, options);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || `Request failed (${response.status})`);
+  }
+  return payload;
+}
+
+function getNumberValue(id) {
+  return Number(document.getElementById(id)?.value || 0);
+}
+
+function getSelectValue(id, fallback = "") {
+  return document.getElementById(id)?.value || fallback;
+}
+
+function setText(id, value) {
+  const element = document.getElementById(id);
+  if (element) {
+    element.textContent = value;
+  }
+}
+
+function animateNumber(id, value) {
+  const element = document.getElementById(id);
+  if (element) {
+    element.textContent = Math.round(value).toLocaleString();
+  }
+}
+
+function formatNumber(value, decimals = 0) {
+  return Number(value).toLocaleString(undefined, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+function formatDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown date";
+  }
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function setStatus(id, message, kind = "") {
+  const element = document.getElementById(id);
+  if (!element) {
+    return;
+  }
+  element.textContent = message;
+  element.classList.remove("success", "error");
+  if (kind) {
+    element.classList.add(kind);
+  }
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text;
   return div.innerHTML;
 }
-/* =====================================================
-   🔥 INSANE QUIZ SYSTEM
-===================================================== */
 
-const quizData = [
-  {
-    question: "What percentage of Earth's water is freshwater?",
-    options: ["3%", "10%", "50%", "97%"],
-    answer: 0,
-  },
-  {
-    question: "Best way to save water while brushing?",
-    options: ["Use hot water", "Turn off tap", "Brush faster", "None"],
-    answer: 1,
-  },
-  {
-    question: "How much water does a leaky faucet waste per year?",
-    options: ["500 liters", "3,000 liters", "10,000+ liters", "100 liters"],
-    answer: 2,
-  },
-  {
-    question: "Recommended shower duration to conserve water?",
-    options: ["10 minutes", "5 minutes", "15 minutes", "20 minutes"],
-    answer: 1,
-  },
-  {
-    question: "Agriculture accounts for approximately what % of water usage?",
-    options: ["20%", "40%", "70%", "90%"],
-    answer: 2,
-  },
-  {
-    question: "Which activity uses the most household water?",
-    options: ["Brushing teeth", "Toilet flushing", "Drinking", "Washing hands"],
-    answer: 1,
-  },
-  {
-    question: "Fixing leaks can save how much water annually?",
-    options: ["Hundreds of liters", "Thousands of liters", "10 liters", "None"],
-    answer: 1,
-  },
-  {
-    question: "Best time to water plants?",
-    options: ["Noon", "Afternoon", "Early morning", "Midnight"],
-    answer: 2,
-  },
-  {
-    question: "What is the water content in an average person's body?",
-    options: ["30%", "50%", "60%", "80%"],
-    answer: 2,
-  },
-  {
-    question: "How much water does washing a car with a hose waste?",
-    options: ["20 liters", "50 liters", "100+ liters", "5 liters"],
-    answer: 2,
-  },
-  {
-    question: "What is a low-flow faucet aerator designed to do?",
-    options: ["Increase water pressure", "Mix air with water", "Heat water faster", "Filter water"],
-    answer: 1,
-  },
-  {
-    question: "How much water does a toilet leak waste per day?",
-    options: ["5 liters", "25 liters", "50+ liters", "1 liter"],
-    answer: 2,
-  },
-  {
-    question: "What percentage of household water is used indoors?",
-    options: ["40%", "50%", "70%", "90%"],
-    answer: 3,
-  },
-  {
-    question: "Which appliance uses the most water in most homes?",
-    options: ["Dishwasher", "Washing machine", "Toilet", "Shower"],
-    answer: 2,
-  },
-  {
-    question: "How much water is needed to produce 1 kg of beef?",
-    options: ["500 liters", "7,000 liters", "15,000 liters", "25,000 liters"],
-    answer: 2,
-  },
-  {
-    question: "What is the best way to thaw frozen food?",
-    options: ["Under running water", "In the refrigerator", "On the counter", "In a microwave"],
-    answer: 1,
-  },
-  {
-    question: "How much water does a dripping faucet waste per year?",
-    options: ["500 liters", "3,000 liters", "10,000 liters", "20,000 liters"],
-    answer: 2,
-  },
-  {
-    question: "What does mulch do for plants?",
-    options: ["Adds nutrients", "Retains moisture", "Kills weeds", "Attracts insects"],
-    answer: 1,
-  },
-  {
-    question: "How much water does a typical dishwasher use per load?",
-    options: ["5 liters", "15 liters", "25 liters", "50 liters"],
-    answer: 2,
-  },
-  {
-    question: "What is the main benefit of installing a rain barrel?",
-    options: ["Save money on water", "Collect free water", "Improve water quality", "All of the above"],
-    answer: 3,
-  },
-  {
-    question: "How many gallons does a modern toilet flush use?",
-    options: ["3-5 gallons", "6-8 gallons", "10-12 gallons", "15+ gallons"],
-    answer: 0,
-  },
-  {
-    question: "What percentage of water on Earth is usable freshwater?",
-    options: ["1%", "3%", "0.5%", "10%"],
-    answer: 2,
-  },
-  {
-    question: "How much water is needed to produce a cotton shirt?",
-    options: ["500 liters", "2,000 liters", "7,000 liters", "1,000 liters"],
-    answer: 2,
-  },
-];
-
-let currentQuestionIndex = 0;
-let quizScore = 0;
-
-let quizQuestions = [];
-const QUESTIONS_PER_QUIZ = 6;
-
-let streak = 0;
-let bestScore = Number(localStorage.getItem("aquasave-best-score") || 0);
-
-let questionTimer = null;
-const QUESTION_TIME = 15;
-let timeLeft = QUESTION_TIME;
-
-/* ================== INIT ================== */
-
-function initQuiz() {
-  const startBtn = document.getElementById("startQuizBtn");
-  const container = document.getElementById("quiz-container");
-
-  if (!startBtn || !container) return;
-
-  startBtn.addEventListener("click", startQuiz);
-  // leaderboard on quiz page removed; render only if element present
-  if (document.getElementById("leaderboard-list")) renderLeaderboard();
-}
-
-function initLeaderboard() {
-  // called on the separate leaderboard page
-  if (document.getElementById("leaderboard-list")) {
-    renderLeaderboard();
-  }
-}
-
-/* ================== SHUFFLE ================== */
-
-function shuffleArray(arr) {
-  const copy = [...arr];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
-/* ================== START ================== */
-
-function startQuiz() {
-  currentQuestionIndex = 0;
-  quizScore = 0;
-  streak = 0;
-
-  quizQuestions = shuffleArray(quizData).slice(0, QUESTIONS_PER_QUIZ);
-
-  showQuestion();
-}
-
-/* ================== SHOW QUESTION ================== */
-
-function showQuestion() {
-  const container = document.getElementById("quiz-container");
-  if (!container) return;
-
-  clearInterval(questionTimer);
-  timeLeft = QUESTION_TIME;
-
-  const q = quizQuestions[currentQuestionIndex];
-
-  container.innerHTML = `
-    <div class="quiz-topbar">
-      <div>Question ${currentQuestionIndex + 1}/${QUESTIONS_PER_QUIZ}</div>
-      <div>⏱️ <span id="timer">${timeLeft}</span>s</div>
-    </div>
-
-    <div class="progress-bar">
-      <div class="progress-fill" style="width:${((currentQuestionIndex)/QUESTIONS_PER_QUIZ)*100}%"></div>
-    </div>
-
-    <p class="question-text">${q.question}</p>
-
-    <div class="options-grid">
-      ${q.options
-        .map(
-          (opt, i) =>
-            `<button class="option-btn" data-i="${i}">${opt}</button>`
-        )
-        .join("")}
-    </div>
-
-    <button id="nextQuestionBtn" disabled>Next Question</button>
-  `;
-
-  questionTimer = setInterval(updateTimer, 1000);
-
-  container.querySelectorAll(".option-btn").forEach((btn) => {
-    btn.addEventListener("click", () => selectOption(btn));
-  });
-
-  document
-    .getElementById("nextQuestionBtn")
-    .addEventListener("click", nextQuestion);
-}
-
-/* ================== TIMER ================== */
-
-function updateTimer() {
-  timeLeft--;
-  const t = document.getElementById("timer");
-  if (t) t.textContent = timeLeft;
-
-  if (timeLeft <= 0) {
-    handleTimeout();
-  }
-}
-
-// mark unanswered question and proceed after delay
-function handleTimeout() {
-  clearInterval(questionTimer);
-  streak = 0;
-
-  const container = document.getElementById("quiz-container");
-  if (!container) return;
-
-  // disable buttons and show the correct answer
-  container.querySelectorAll(".option-btn").forEach((btn, i) => {
-    btn.disabled = true;
-    if (i === quizQuestions[currentQuestionIndex].answer) {
-      btn.classList.add("correct-answer");
-    }
-  });
-
-  // automatically advance to next question after brief pause
-  setTimeout(() => {
-    const nextBtn = document.getElementById("nextQuestionBtn");
-    if (nextBtn) nextBtn.disabled = false;
-    nextQuestion();
-  }, 1500);
-}
-
-/* ================== SELECT ================== */
-
-function selectOption(btn) {
-  // 🚫 If already answered, do nothing
-  if (document.querySelector(".options-grid.locked")) return;
-
-  clearInterval(questionTimer);
-
-  const grid = btn.closest(".options-grid");
-  grid.classList.add("locked"); // 🔒 lock all options
-
-  const selected = +btn.dataset.i;
-  const correctIndex = quizQuestions[currentQuestionIndex].answer;
-  const isCorrect = selected === correctIndex;
-
-  // Disable ALL buttons immediately
-  grid.querySelectorAll(".option-btn").forEach(b => {
-    b.disabled = true;
-  });
-
-  // Mark selected
-  btn.classList.add(isCorrect ? "correct" : "incorrect");
-
-  // Always reveal correct answer
-  grid.querySelectorAll(".option-btn").forEach((b, i) => {
-    if (i === correctIndex) {
-      b.classList.add("correct-answer");
-    }
-  });
-
-  // Score logic
-  if (isCorrect) {
-    streak++;
-    quizScore += 1;
-  } else {
-    streak = 0;
-  }
-
-  // Enable next button
-  const nextBtn = document.getElementById("nextQuestionBtn");
-  if (nextBtn) nextBtn.disabled = false;
-}
-
-/* ================== NEXT ================== */
-
-function nextQuestion() {
-  currentQuestionIndex++;
-
-  if (currentQuestionIndex < QUESTIONS_PER_QUIZ) {
-    showQuestion();
-  } else {
-    finishQuiz();
-  }
-}
-
-/* ================== FINISH ================== */
-
-function finishQuiz() {
-  const container = document.getElementById("quiz-container");
-  if (!container) return;
-
-  const finalScore = Math.round(quizScore * 100) / 100;
-
-  if (finalScore > bestScore) {
-    bestScore = finalScore;
-    localStorage.setItem("aquasave-best-score", bestScore);
-  }
-
-  // show score and ask for player name
-  container.innerHTML = `
-    <div class="quiz-complete" style="text-align:center;">
-      <h3>Quiz Complete! 🎉</h3>
-      <p style="font-size:2em;margin:20px 0;">
-        Score: <strong>${finalScore}/${QUESTIONS_PER_QUIZ}</strong>
-      </p>
-      <p>🔥 Best Score: ${bestScore}</p>
-      <div id="nameEntry" style="margin-top:20px;">
-        <input id="playerName" type="text" placeholder="Enter your name" maxlength="20" style="padding:8px 12px;border-radius:var(--border-radius);border:1px solid #ccc;width:200px;">
-        <button id="saveNameBtn" style="padding:8px 16px;margin-left:10px;">Save</button>
-      </div>
-      <div id="postSave" style="display:none;margin-top:15px;">
-        <button id="playAgainBtn" style="margin-top:15px;">Play Again</button>
-      </div>
-    </div>
-  `;
-
-  document.getElementById("saveNameBtn").addEventListener("click", () => {
-    const nameInput = document.getElementById("playerName");
-    const name = nameInput.value.trim() || "Anonymous";
-    updateLeaderboard(name, finalScore);
-    renderLeaderboard();
-    document.getElementById("nameEntry").style.display = "none";
-    const post = document.getElementById("postSave");
-    post.style.display = "block";
-    document.getElementById("playAgainBtn").addEventListener("click", startQuiz);
-  });
-}
-
-/* ================== LEADERBOARD ================== */
-
-function loadLeaderboard() {
-  const raw = JSON.parse(localStorage.getItem("aquasave-leaderboard") || "[]");
-  // clean any existing names that may contain leading numbers
-  const cleaned = raw.map(item => ({
-    name: sanitizeName(item.name),
-    score: item.score,
-  }));
-  // if cleaning removed prefixes, rewrite storage so issue doesn't recur
-  if (JSON.stringify(cleaned) !== JSON.stringify(raw)) {
-    localStorage.setItem("aquasave-leaderboard", JSON.stringify(cleaned));
-  }
-  return cleaned;
-}
-
-function sanitizeName(raw) {
-  // remove any leading numbering/punctuation groups, e.g. "1. ", "2) ", "03 - ",
-  // or repeated prefixes that might appear after storage.
-  return raw.replace(/^\s*(?:[0-9]+[\.)\-\s]*)+/, '').trim();
-}
-
-
-function updateLeaderboard(name, score) {
-  const list = loadLeaderboard();
-  const cleanName = sanitizeName(name) || "Anonymous";
-  list.push({ name: cleanName, score });
-  list.sort((a, b) => b.score - a.score);
-  localStorage.setItem(
-    "aquasave-leaderboard",
-    JSON.stringify(list.slice(0, 10))
-  );
-}
-
-function renderLeaderboard() {
-  const list = loadLeaderboard();
-  const ol = document.getElementById("leaderboard-list");
-  if (!ol) return;
-
-  if (!list.length) {
-    ol.innerHTML = "<li>No scores yet. Be the first!</li>";
-    return;
-  }
-
-  ol.innerHTML = list
-    .map((item, idx) => {
-      const name = sanitizeName(item.name);
-      return `<li>${idx + 1}. ${name} - ${item.score}</li>`;
-    })
-    .join("");
-}
-
-console.log("💧 AquaSave Loaded - Ready!");
+console.log("AquaSave Loaded - Ready!");

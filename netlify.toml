@@ -8,6 +8,21 @@
   status = 200
 
 [[redirects]]
+  from = "/api/quiz/questions"
+  to = "/.netlify/functions/quiz-questions"
+  status = 200
+
+[[redirects]]
+  from = "/api/quiz/leaderboard"
+  to = "/.netlify/functions/quiz-leaderboard"
+  status = 200
+
+[[redirects]]
+  from = "/api/quiz/submit-score"
+  to = "/.netlify/functions/quiz-submit-score"
+  status = 200
+
+[[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
