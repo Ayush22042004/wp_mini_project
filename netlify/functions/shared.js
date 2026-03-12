@@ -1,7 +1,16 @@
 const path = require("path");
 const fs = require("fs");
 
-const dataDir = path.resolve(__dirname, "../../data");
+// In a Netlify bundled Lambda, __dirname is the function root (/var/task) and
+// included_files land at __dirname/data. In local dev, __dirname is
+// netlify/functions/ and data is two directories up at the project root.
+const dataDir = (() => {
+  const inBundle = path.join(__dirname, "data");
+  try {
+    if (fs.statSync(inBundle).isDirectory()) return inBundle;
+  } catch (_) {}
+  return path.resolve(__dirname, "../../data");
+})();
 
 const CORS_HEADERS = {
   "Content-Type": "application/json",
@@ -32,7 +41,6 @@ function ensureDataDir() {
 }
 
 function readJsonFile(filename, fallback) {
-  ensureDataDir();
   const filePath = path.join(dataDir, filename);
   try {
     const raw = fs.readFileSync(filePath, "utf8");
@@ -44,9 +52,19 @@ function readJsonFile(filename, fallback) {
 }
 
 function writeJsonFile(filename, payload) {
-  ensureDataDir();
-  const filePath = path.join(dataDir, filename);
-  fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), "utf8");
+  // Netlify Lambda has a read-only filesystem outside /tmp.
+  // Use /tmp for ephemeral writes when the normal data dir is not writable.
+  let filePath = path.join(dataDir, filename);
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), "utf8");
+  } catch (err) {
+    if (err.code === "EROFS" || err.code === "EACCES" || err.code === "ENOENT") {
+      const tmpPath = path.join("/tmp", filename);
+      fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), "utf8");
+    } else {
+      throw err;
+    }
+  }
 }
 
 function clamp(value, min, max) {
