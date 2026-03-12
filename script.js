@@ -716,6 +716,34 @@ async function renderLeaderboard(existingLeaderboard) {
   }
 }
 
+const REPORTS_STORAGE_KEY = "aquasave_wastage_reports";
+
+function loadLocalReports() {
+  try {
+    const raw = localStorage.getItem(REPORTS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveLocalReports(reports) {
+  try {
+    localStorage.setItem(REPORTS_STORAGE_KEY, JSON.stringify(reports));
+  } catch (_) {}
+}
+
+function haversineKmClient(lat1, lng1, lat2, lng2) {
+  const toRad = (v) => (v * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function initNearbyReportsMap() {
   const locateButton = document.getElementById("locateReportsBtn");
   const demoButton = document.getElementById("useDemoLocationBtn");
@@ -813,14 +841,29 @@ async function loadNearbyReports() {
   const radiusKm = getNumberValue("reportRadius") || 5;
   const { lat, lng } = nearbyState.currentPosition;
 
+  // Merge API seed data with locally-submitted reports
+  let apiReports = [];
   try {
     const payload = await apiFetchJson(`/api/wastage-reports?lat=${lat}&lng=${lng}&radiusKm=${radiusKm}`);
-    nearbyState.reports = Array.isArray(payload.reports) ? payload.reports : [];
-    renderNearbyReports(payload.meta || {});
-  } catch (error) {
-    console.error("Nearby reports error:", error);
-    setStatus("reportsStatus", error.message || "Unable to load nearby reports.", "error");
+    apiReports = Array.isArray(payload.reports) ? payload.reports : [];
+  } catch (_) {
+    // API unavailable — local reports only
   }
+
+  const localReports = loadLocalReports().map((r) => ({
+    ...r,
+    distanceKm: haversineKmClient(lat, lng, Number(r.lat), Number(r.lng)),
+  })).filter((r) => r.distanceKm <= radiusKm);
+
+  // Deduplicate: prefer API version of any report with the same id
+  const apiIds = new Set(apiReports.map((r) => r.id));
+  const merged = [
+    ...apiReports,
+    ...localReports.filter((r) => !apiIds.has(r.id)),
+  ].sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
+
+  nearbyState.reports = merged;
+  renderNearbyReports({ radiusKm, total: merged.length });
 }
 
 function renderNearbyReports(meta) {
@@ -888,25 +931,36 @@ async function submitNearbyReport(event) {
     return;
   }
 
-  try {
-    await apiFetchJson("/api/wastage-reports", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type,
-        description,
-        lat: nearbyState.currentPosition.lat,
-        lng: nearbyState.currentPosition.lng,
-      }),
-    });
+  // Save locally first so it always appears in the feed
+  const newReport = {
+    id: `local-${Date.now()}`,
+    type,
+    description,
+    lat: nearbyState.currentPosition.lat,
+    lng: nearbyState.currentPosition.lng,
+    source: "Community report",
+    status: "Open",
+    createdAt: new Date().toISOString(),
+  };
+  const existing = loadLocalReports();
+  existing.push(newReport);
+  saveLocalReports(existing.slice(-100)); // keep last 100
 
-    document.getElementById("reportIssueForm")?.reset();
-    setStatus("reportSubmitStatus", "Report submitted. It now appears in the nearby feed.", "success");
-    loadNearbyReports();
-  } catch (error) {
-    console.error("Report submit error:", error);
-    setStatus("reportSubmitStatus", error.message || "Unable to save your report.", "error");
-  }
+  document.getElementById("reportIssueForm")?.reset();
+  setStatus("reportSubmitStatus", "Report submitted. It now appears in the nearby feed.", "success");
+  loadNearbyReports();
+
+  // Best-effort API sync (non-blocking)
+  apiFetchJson("/api/wastage-reports", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type,
+      description,
+      lat: nearbyState.currentPosition.lat,
+      lng: nearbyState.currentPosition.lng,
+    }),
+  }).catch(() => {});
 }
 
 function initShareActions() {
