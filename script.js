@@ -638,25 +638,48 @@ function finishQuiz() {
   document.getElementById("nativeShareQuizBtn")?.addEventListener("click", () => handleNativeShare("quiz"));
 }
 
-async function submitQuizScore(name, score) {
-  try {
-    const payload = await apiFetchJson("/api/quiz/submit-score", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        score,
-        totalQuestions: QUESTIONS_PER_QUIZ,
-        mode: currentQuizMode,
-      }),
-    });
+const LEADERBOARD_STORAGE_KEY = "aquasave_leaderboard";
 
-    setStatus("quizSaveStatus", `Saved. ${name} is now on the API leaderboard.`, "success");
-    renderLeaderboard(payload.leaderboard);
-  } catch (error) {
-    console.error("Quiz save error:", error);
-    setStatus("quizSaveStatus", error.message || "Unable to save score.", "error");
+function loadLocalLeaderboard() {
+  try {
+    const raw = localStorage.getItem(LEADERBOARD_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (_) {
+    return [];
   }
+}
+
+function saveLocalLeaderboard(entries) {
+  try {
+    localStorage.setItem(LEADERBOARD_STORAGE_KEY, JSON.stringify(entries));
+  } catch (_) {}
+}
+
+async function submitQuizScore(name, score) {
+  const newEntry = {
+    id: `local-${Date.now()}`,
+    name,
+    score,
+    totalQuestions: QUESTIONS_PER_QUIZ,
+    mode: currentQuizMode,
+    createdAt: new Date().toISOString(),
+  };
+
+  const entries = loadLocalLeaderboard();
+  entries.push(newEntry);
+  entries.sort((a, b) => b.score !== a.score ? b.score - a.score : new Date(a.createdAt) - new Date(b.createdAt));
+  const trimmed = entries.slice(0, 25);
+  saveLocalLeaderboard(trimmed);
+
+  setStatus("quizSaveStatus", `Saved! ${escapeHtml(name)} is on the leaderboard.`, "success");
+  renderLeaderboard(trimmed.slice(0, 10));
+
+  // Best-effort API sync (non-blocking)
+  apiFetchJson("/api/quiz/submit-score", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, score, totalQuestions: QUESTIONS_PER_QUIZ, mode: currentQuizMode }),
+  }).catch(() => {});
 }
 
 async function renderLeaderboard(existingLeaderboard) {
@@ -665,20 +688,31 @@ async function renderLeaderboard(existingLeaderboard) {
     return;
   }
 
+  // Prefer provided data or localStorage; API is best-effort only
+  const local = existingLeaderboard || loadLocalLeaderboard().slice(0, 10);
+
+  if (Array.isArray(local) && local.length) {
+    leaderboardElement.innerHTML = local
+      .map((entry, index) => `<li>${index + 1}. ${escapeHtml(entry.name)} — ${entry.score}/${entry.totalQuestions || QUESTIONS_PER_QUIZ}</li>`)
+      .join("");
+    return;
+  }
+
+  // No local data — try the API as a seed
   try {
-    const leaderboard = existingLeaderboard || (await apiFetchJson("/api/quiz/leaderboard")).leaderboard;
+    const response = await apiFetchJson("/api/quiz/leaderboard");
+    const leaderboard = response.leaderboard;
     if (!Array.isArray(leaderboard) || !leaderboard.length) {
       leaderboardElement.innerHTML = "<li>No scores yet. Be the first!</li>";
       return;
     }
-
     leaderboardElement.innerHTML = leaderboard
       .slice(0, 10)
       .map((entry, index) => `<li>${index + 1}. ${escapeHtml(entry.name)} — ${entry.score}/${entry.totalQuestions || QUESTIONS_PER_QUIZ}</li>`)
       .join("");
   } catch (error) {
     console.error("Leaderboard render error:", error);
-    leaderboardElement.innerHTML = "<li>Leaderboard is temporarily unavailable.</li>";
+    leaderboardElement.innerHTML = "<li>No scores yet. Be the first!</li>";
   }
 }
 

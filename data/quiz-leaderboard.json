@@ -6,5 +6,13 @@
     "totalQuestions": 6,
     "mode": "curated",
     "createdAt": "2026-03-12T09:28:20.605Z"
+  },
+  {
+    "id": "af2be8c3-b9cf-45ec-a5fd-2daa2db181c7",
+    "name": "sdg",
+    "score": 1,
+    "totalQuestions": 6,
+    "mode": "curated",
+    "createdAt": "2026-03-12T17:30:03.484Z"
   }
 ]
