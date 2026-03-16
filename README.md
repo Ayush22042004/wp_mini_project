@@ -199,4 +199,5 @@ Designed and developed by **Ayush Singh**, **Kunal Datkhile**, **Prathmesh Achar
 ## License
 
 MIT License.
+
 *Made with 💙 of our planet*
