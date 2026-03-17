@@ -1,4 +1,6 @@
 # 💧 AquaSave
+live demo:- 
+[Aquasave](aquasave0.netlify.app)
 
 > A water-conservation education platform with interactive tools, practical tips, and API-backed experiences that help people understand and reduce their water footprint.
 
