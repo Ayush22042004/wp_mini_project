@@ -57,7 +57,6 @@ document.addEventListener("DOMContentLoaded", () => {
   initTips();
   initChecklist();
   initScrollEffects();
-  initContactForm();
   initQuiz();
   initLeaderboard();
   initNearbyReportsMap();
@@ -393,42 +392,6 @@ function initScrollEffects() {
     observer.observe(element);
   });
 }
-
-function initContactForm() {
-  const form = document.getElementById("contactForm");
-  const message = document.getElementById("contactMessage");
-  const charCount = document.getElementById("charCount");
-
-  if (message && charCount) {
-    const updateCount = () => {
-      charCount.textContent = String(message.value.length);
-    };
-    message.addEventListener("input", updateCount);
-    updateCount();
-  }
-
-  if (!form) {
-    return;
-  }
-
-  form.addEventListener("submit", (event) => {
-    const name = document.getElementById("contactName")?.value.trim();
-    const email = document.getElementById("contactEmail")?.value.trim();
-    const content = document.getElementById("contactMessage")?.value.trim();
-
-    if (!name || !email || !content) {
-      event.preventDefault();
-      alert("Please fill all required fields.");
-      return;
-    }
-
-    if (!email.includes("@")) {
-      event.preventDefault();
-      alert("Please enter a valid email address.");
-    }
-  });
-}
-
 function initQuiz() {
   const startBtn = document.getElementById("startQuizBtn");
   if (!startBtn) {
