@@ -96,7 +96,7 @@ function normalizeLeaderboard(entries) {
       name: sanitizeName(e.name),
       score: Number(e.score),
       totalQuestions: Number(e.totalQuestions) || 0,
-      mode: e.mode === "ai" ? "ai" : "curated",
+      mode: "curated",
       createdAt: e.createdAt || new Date().toISOString(),
     }))
     .sort((a, b) => {

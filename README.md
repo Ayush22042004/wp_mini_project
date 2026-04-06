@@ -1,6 +1,7 @@
-# 💧 AquaSave
-live demo:- 
-[Aquasave](aquasave0.netlify.app)
+# AquaSave
+
+Live demo:
+[AquaSave](https://aquasave0.netlify.app)
 
 > A water-conservation education platform with interactive tools, practical tips, and API-backed experiences that help people understand and reduce their water footprint.
 
@@ -15,15 +16,14 @@ live demo:-
 
 ## Features
 
-- **Water Facts** — Key statistics about global water usage and scarcity.
-- **Source-Backed Calculator** — Calculates your household water footprint with EPA/ENERGY STAR sourced figures.
-- **Social Sharing** — Share results via WhatsApp, X, Facebook, LinkedIn, or clipboard.
-- **Quick Quiz** — Randomised questions from a curated bank or AI-generated via Gemini.
-- **Leaderboard** — Persistent scores stored through the backend API.
-- **Nearby Reports Map** — See and submit water-wastage reports using geolocation and Leaflet.
-- **AI Chat Assistant** — Gemini-powered chatbot for water conservation Q&A.
-- **Conservation Tips & Checklist** — Practical advice across bathroom, kitchen, outdoor, and general categories.
-- **Responsive Design** — Works on desktop, tablet, and mobile.
+- **Water Facts** - Key statistics about global water usage and scarcity.
+- **Source-Backed Calculator** - Calculates household water footprint using sourced benchmark data.
+- **Quick Quiz** - Randomized questions from a curated 10-question quiz round.
+- **Leaderboard** - Persistent score tracking through the backend API.
+- **Nearby Reports Map** - View and submit water-wastage reports using geolocation and Leaflet.
+- **Social Sharing** - Share calculator and quiz results through common social platforms.
+- **Conservation Tips and Checklist** - Practical water-saving actions for daily life.
+- **Responsive Design** - Works across desktop and mobile screens.
 
 ---
 
@@ -33,42 +33,40 @@ live demo:-
 |-------|-----------|
 | Frontend | HTML5, CSS3, Vanilla JavaScript |
 | Backend (local) | Node.js, Express |
-| Backend (deployed) | Netlify Functions (serverless) |
-| AI | Google Gemini 2.5 Flash |
+| Backend (deployed) | Netlify Functions |
 | Maps | Leaflet + OpenStreetMap |
-| Data | Local JSON files (swappable with a database) |
+| Data | Local JSON files |
 
 ---
 
 ## Project Structure
 
+```text
+wp_mini_project/
+|-- index.html
+|-- leaderboard.html
+|-- styles.css
+|-- script.js
+|-- package.json
+|-- netlify.toml
+|-- data/
+|   |-- calculator-sources.json
+|   |-- quiz-questions.json
+|   |-- quiz-leaderboard.json
+|   `-- wastage-reports.json
+|-- server/
+|   |-- server.js
+|   `-- package.json
+`-- netlify/functions/
+    |-- calculator-metadata.js
+    |-- gemini.js
+    |-- quiz-leaderboard.js
+    |-- quiz-questions.js
+    |-- quiz-submit-score.js
+    |-- shared.js
+    `-- wastage-reports.js
 ```
-├── index.html              # Main page
-├── leaderboard.html        # Standalone leaderboard page
-├── styles.css              # All styles
-├── script.js               # Frontend logic
-├── package.json            # Root dependencies
-├── netlify.toml            # Netlify build & redirect config
-│
-├── data/                   # JSON data layer
-│   ├── calculator-sources.json
-│   ├── quiz-questions.json
-│   ├── quiz-leaderboard.json
-│   └── wastage-reports.json
-│
-├── server/                 # Express dev server
-│   ├── server.js
-│   └── package.json
-│
-└── netlify/functions/      # Serverless functions (deployed)
-    ├── shared.js
-    ├── gemini.js
-    ├── calculator-metadata.js
-    ├── quiz-questions.js
-    ├── quiz-leaderboard.js
-    ├── quiz-submit-score.js
-    └── wastage-reports.js
-```
+
 
 ---
 
@@ -77,8 +75,7 @@ live demo:-
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/) v18+
-- A [Google Gemini API key](https://ai.google.dev/)
-- (Optional) [Netlify CLI](https://docs.netlify.com/cli/get-started/) for local serverless testing
+- Optional: [Netlify CLI](https://docs.netlify.com/cli/get-started/) for local serverless testing
 
 ### 1. Clone the repository
 
@@ -91,115 +88,76 @@ cd aquasave
 
 ```bash
 npm install
-cd server && npm install && cd ..
+cd server
+npm install
 ```
 
-### 3. Set up environment variables
+### 3. Run locally
 
-Create **`server/.env`** for the Express server:
-
-```env
-GEMINI_API_KEY=your_api_key_here
-```
-
-For Netlify (local or deployed), set the same key as an environment variable:
-
-```bash
-# Local: create a .env file in the project root
-echo "GEMINI_API_KEY=your_api_key_here" > .env
-
-# Deployed: set via Netlify dashboard → Site settings → Environment variables
-```
-
-### 4. Run locally
-
-**Option A — Express server (port 3000):**
+Option A - Express server:
 
 ```bash
 cd server
 node server.js
 ```
 
-Open `http://localhost:3000`
+Open `http://localhost:3000`.
 
-**Option B — Netlify Dev (port 8888):**
+Option B - Netlify Dev:
 
 ```bash
 netlify dev
 ```
 
-Open `http://localhost:8888`
+Open `http://localhost:8888`.
 
-> **Note:** Do not open `index.html` directly as a `file://` URL. The calculator, quiz, leaderboard, AI assistant, and reports features all require API endpoints.
+> Do not open `index.html` directly as a `file://` URL. The calculator, quiz, leaderboard, and reports features rely on API endpoints.
 
 ---
 
 ## Deployment
 
-### Deploy to Netlify
+### Netlify
 
 1. Push the repository to GitHub.
-2. Go to [app.netlify.com](https://app.netlify.com/) → **Add new site** → **Import an existing project**.
-3. Connect your GitHub repo.
-4. Build settings are auto-detected from [`netlify.toml`](netlify.toml):
-   - **Publish directory:** `.`
-   - **Functions directory:** `netlify/functions`
-5. Add the environment variable `GEMINI_API_KEY` under **Site settings → Environment variables**.
-6. Click **Deploy site**.
+2. Import the repository into Netlify.
+3. Use the settings from `netlify.toml`.
+4. Deploy the site.
 
-Every push to your main branch will trigger an automatic redeploy.
+### Other Platforms
 
-### Deploy to Other Platforms
-
-AquaSave is static HTML + serverless functions, so it can also be adapted for:
-
-- **Vercel** — Convert Netlify functions to `/api` directory functions.
-- **GitHub Pages** — Frontend only (API features require a separate backend host).
-- **Railway / Render** — Use the Express server in `server/` as a standalone backend.
+- **Vercel** - Adapt the serverless functions to Vercel API routes.
+- **GitHub Pages** - Frontend only; API features require a separate backend.
+- **Railway / Render** - Run the Express server in `server/` as the backend.
 
 ---
 
 ## API Endpoints
 
-All routes are available via Express (`/api/...`) and Netlify Functions (auto-redirected by [`netlify.toml`](netlify.toml)).
-
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/calculator-metadata` | Calculator factors with source provenance |
-| GET | `/api/quiz/questions?count=6&mode=curated` | Curated quiz questions |
-| GET | `/api/quiz/questions?count=6&mode=ai` | AI-generated questions via Gemini |
+| GET | `/api/quiz/questions?count=10` | Curated quiz questions |
 | GET | `/api/quiz/leaderboard` | Top leaderboard entries |
 | POST | `/api/quiz/submit-score` | Save a quiz score |
 | GET | `/api/wastage-reports?lat=...&lng=...&radiusKm=5` | Nearby reports by location |
 | POST | `/api/wastage-reports` | Submit a new report |
-| POST | `/api/gemini` | AI chat proxy |
-
----
-
-## Calculator Methodology
-
-The calculator reads factors from [`data/calculator-sources.json`](data/calculator-sources.json) and shows provenance in a collapsible panel.
-
-- **Verified** — Sourced from EPA WaterSense, ENERGY STAR, and similar public references.
-- **Estimate** — AquaSave planning assumptions where no single universal standard exists, clearly labelled.
 
 ---
 
 ## Customization
 
-- **Contact form** — Update the Formspree endpoint in [`index.html`](index.html).
-- **Quiz bank** — Extend [`data/quiz-questions.json`](data/quiz-questions.json).
-- **Calculator factors** — Edit [`data/calculator-sources.json`](data/calculator-sources.json).
-- **Database** — Replace local JSON files with MongoDB, Supabase, or Netlify Blobs for production persistence.
+- **Quiz bank** - Edit `data/quiz-questions.json`.
+- **Calculator factors** - Edit `data/calculator-sources.json`.
+- **Stored reports** - Edit `data/wastage-reports.json`.
+- **Persistence layer** - Replace JSON files with a database for production use.
 
 ---
 
 ## Team
 
-Designed and developed by **Ayush Singh**, **Kunal Datkhile**, **Prathmesh Achare**, and **Alby John**.
+Designed and developed by **Ramakant Shrivastava**, **Priyanshu chauhan **, **Harsh Gaikwad**, and **Swaraj Patil**.
 
 ## License
 
 MIT License.
-
-*Made with 💙 of our planet*

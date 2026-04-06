@@ -41,7 +41,7 @@ let currentQuizNotice = "";
 let questionTimer = null;
 let timeLeft = 15;
 let bestScore = Number(localStorage.getItem("aquasave-best-score") || 0);
-const QUESTIONS_PER_QUIZ = 6;
+const QUESTIONS_PER_QUIZ = 10;
 const QUESTION_TIME = 15;
 const nearbyState = {
   map: null,
@@ -60,7 +60,6 @@ document.addEventListener("DOMContentLoaded", () => {
   initQuiz();
   initLeaderboard();
   initNearbyReportsMap();
-  initAIAssistant();
   initShareActions();
 });
 
@@ -399,8 +398,7 @@ function initQuiz() {
   }
 
   startBtn.addEventListener("click", () => {
-    const mode = Math.random() < 0.5 ? "curated" : "ai";
-    startQuiz(mode);
+    startQuiz();
   });
 }
 
@@ -424,9 +422,9 @@ async function startQuiz(mode = "curated") {
   container.innerHTML = `<p class="quiz-note">Loading questions...</p>`;
 
   try {
-    const payload = await apiFetchJson(`/api/quiz/questions?count=${QUESTIONS_PER_QUIZ}&mode=${mode}`);
+    const payload = await apiFetchJson(`/api/quiz/questions?count=${QUESTIONS_PER_QUIZ}`);
     quizQuestions = Array.isArray(payload.questions) ? payload.questions : [];
-    currentQuizMode = payload.mode || mode;
+    currentQuizMode = "curated";
     currentQuizNotice = payload.notice || "";
 
     if (!quizQuestions.length) {
@@ -595,8 +593,7 @@ function finishQuiz() {
     await submitQuizScore(playerName, finalScore);
   });
   document.getElementById("playAgainBtn")?.addEventListener("click", () => {
-    const mode = Math.random() < 0.5 ? "curated" : "ai";
-    startQuiz(mode);
+    startQuiz();
   });
   document.getElementById("nativeShareQuizBtn")?.addEventListener("click", () => handleNativeShare("quiz"));
 }
@@ -1004,7 +1001,7 @@ function buildSharePayload(context) {
   }
 
   if (context === "quiz") {
-    const summary = `I scored ${quizScore}/${QUESTIONS_PER_QUIZ} on the AquaSave ${currentQuizMode} water quiz.`;
+    const summary = `I scored ${quizScore}/${QUESTIONS_PER_QUIZ} on the AquaSave water quiz.`;
     return {
       title: "AquaSave Quiz Result",
       text: summary,
@@ -1013,97 +1010,6 @@ function buildSharePayload(context) {
   }
 
   return null;
-}
-
-function initAIAssistant() {
-  const toggleBtn = document.getElementById("aiToggleBtn");
-  const closeBtn = document.getElementById("aiCloseBtn");
-  const chatBox = document.getElementById("aiChatBox");
-  const sendBtn = document.getElementById("aiSendBtn");
-  const input = document.getElementById("aiInput");
-
-  if (!toggleBtn || !closeBtn || !chatBox || !sendBtn || !input) {
-    return;
-  }
-
-  toggleBtn.addEventListener("click", () => {
-    chatBox.classList.toggle("active");
-    if (chatBox.classList.contains("active")) {
-      input.focus();
-    }
-  });
-
-  closeBtn.addEventListener("click", () => {
-    chatBox.classList.remove("active");
-  });
-
-  sendBtn.addEventListener("click", sendAIMessage);
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      sendAIMessage();
-    }
-  });
-}
-
-async function sendAIMessage() {
-  const input = document.getElementById("aiInput");
-  const messages = document.getElementById("aiMessages");
-  const sendBtn = document.getElementById("aiSendBtn");
-  const message = input?.value.trim();
-
-  if (!message || !messages || !sendBtn || !input) {
-    return;
-  }
-
-  const userDiv = document.createElement("div");
-  userDiv.className = "ai-message user-message";
-  userDiv.innerHTML = `<p>${escapeHtml(message)}</p>`;
-  messages.appendChild(userDiv);
-
-  input.value = "";
-  sendBtn.disabled = true;
-
-  const botDiv = document.createElement("div");
-  botDiv.className = "ai-message bot-message";
-  const botText = document.createElement("p");
-  botText.textContent = "Thinking...";
-  botDiv.appendChild(botText);
-  messages.appendChild(botDiv);
-  messages.scrollTop = messages.scrollHeight;
-
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
-    const response = await fetch("/api/gemini", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(data?.error || `API request failed (${response.status})`);
-    }
-
-    let text = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response received.";
-    text = text.replace(/^['"]+|['"]+$/g, "");
-    text = escapeHtml(text).replace(/\n/g, "<br>");
-    botText.innerHTML = text;
-  } catch (error) {
-    if (error?.name === "AbortError") {
-      botText.textContent = "Response took too long. Please try again.";
-    } else if (!navigator.onLine) {
-      botText.textContent = "No internet connection.";
-    } else {
-      botText.textContent = error.message || "Error connecting to AI.";
-    }
-    console.error(error);
-  }
-
-  sendBtn.disabled = false;
-  messages.scrollTop = messages.scrollHeight;
 }
 
 async function apiFetchJson(url, options) {

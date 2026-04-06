@@ -14,7 +14,7 @@ exports.handler = async (event) => {
     const name = sanitizeName(body.name || "Anonymous");
     const score = Number(body.score);
     const totalQuestions = clamp(Number(body.totalQuestions) || 0, 1, 20);
-    const mode = body.mode === "ai" ? "ai" : "curated";
+    const mode = "curated";
 
     if (!Number.isFinite(score) || score < 0) {
       return respond(400, { error: "Valid score is required" });
