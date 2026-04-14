@@ -207,12 +207,12 @@ Designed and developed by **Ayush Singh**, **Kunal Datkhile**, **Prathmesh Achar
 | **Alby John**        | Maps integration, wastage reporting module     |
 
 ## Challenges Faced
-🔹 Integrating serverless functions with frontend routing
-🔹 Handling CORS and API consistency between local and deployed environments
-🔹 Managing state persistence using JSON instead of a database
-🔹 Implementing AI-generated quiz questions dynamically
-🔹 Ensuring accurate geolocation + map rendering
-🔹 Maintaining responsive UI across devices
+- Integrating serverless functions with frontend routing
+- Handling CORS and API consistency between local and deployed environments
+- Managing state persistence using JSON instead of a database
+- Implementing AI-generated quiz questions dynamically
+- Ensuring accurate geolocation + map rendering
+- Maintaining responsive UI across devices
 
 ## License
 
