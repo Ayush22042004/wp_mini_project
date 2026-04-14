@@ -197,6 +197,22 @@ The calculator reads factors from [`data/calculator-sources.json`](data/calculat
 ## Team
 
 Designed and developed by **Ayush Singh**, **Kunal Datkhile**, **Prathmesh Achare**, and **Alby John**.
+## Team Contributions
+
+| Member               | Contribution                                   |
+| -------------------- | ---------------------------------------------- |
+| **Ayush Singh**      | Project architecture, backend APIs, deployment |
+| **Kunal Datkhile**   | Frontend UI/UX design, responsiveness          |
+| **Prathmesh Achare** | Quiz system, leaderboard logic                 |
+| **Alby John**        | Maps integration, wastage reporting module     |
+
+## Challenges Faced
+🔹 Integrating serverless functions with frontend routing
+🔹 Handling CORS and API consistency between local and deployed environments
+🔹 Managing state persistence using JSON instead of a database
+🔹 Implementing AI-generated quiz questions dynamically
+🔹 Ensuring accurate geolocation + map rendering
+🔹 Maintaining responsive UI across devices
 
 ## License
 
